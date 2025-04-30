@@ -7,6 +7,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -48,6 +49,7 @@ func (s *ProxyQueryLookup) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 	if err != nil {
 		return caddyhttp.Error(http.StatusBadRequest, fmt.Errorf("invalid host: %v", err))
 	}
+	log.Printf("Extracted domain: %s", domain)
 
 	// Call the lookup endpoint to fetch the key
 	key, err := s.fetchStoreID(domain)
