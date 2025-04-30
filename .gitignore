@@ -6,3 +6,8 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
+/vcs.xml
+/modules.xml
+/caddy-proxyquerylookup.iml
+/caddy
+./.idea/*
