@@ -106,26 +106,84 @@ func (s *ProxyQueryLookup) appendQueryParam(r *http.Request, value string) {
 }
 
 // UnmarshalCaddyfile sets up the module from Caddyfile tokens.
+// Syntax:
+//
+//	proxyquerylookup {
+//	    lookup_url <url>
+//	    key_param  <name>   # Optional, default "key"
+//	}
 func (s *ProxyQueryLookup) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		args := d.RemainingArgs()
-		if len(args) > 0 {
-			s.LookupURL = args[0]
-		}
-		for d.NextBlock(0) {
-			switch d.Val() {
-			case "key_param":
-				if !d.Args(&s.KeyParam) {
-					return d.ArgErr()
-				}
+	// Consume directive name "proxyquerylookup"
+	if !d.Next() {
+		return d.ArgErr() // Should not happen
+	}
+
+	// No args allowed directly after directive name
+	if d.NextArg() {
+		return d.ArgErr()
+	}
+
+	// Expect a block
+	if !d.NextBlock(0) {
+		return d.Err("expected block following proxyquerylookup directive")
+	}
+
+	// Parse options within the block
+	for d.NextBlock(0) { // Changed loop condition
+		switch d.Val() {
+		case "lookup_url":
+			if !d.NextArg() { // Check for argument
+				return d.ArgErr()
 			}
+			s.LookupURL = d.Val() // Get argument value
+			if d.NextArg() {      // Check for extra arguments
+				return d.ArgErr()
+			}
+		case "key_param":
+			if !d.NextArg() { // Check for argument
+				return d.ArgErr()
+			}
+			s.KeyParam = d.Val() // Get argument value
+			if d.NextArg() {     // Check for extra arguments
+				return d.ArgErr()
+			}
+		default:
+			return d.Errf("unrecognized subdirective '%s'", d.Val())
 		}
+	}
+
+	// Optional: Add a final check after the block if needed,
+	// though Validate() is usually better for required fields.
+	// if d.Next() {
+	//     return d.Err("unexpected tokens after proxyquerylookup block")
+	// }
+
+	return nil
+}
+
+// Add Validate method (implements caddy.Validator)
+func (s *ProxyQueryLookup) Validate() error {
+	if s.LookupURL == "" {
+		// This check ensures lookup_url was provided either directly
+		// or via an environment variable that was actually set.
+		return fmt.Errorf("lookup_url is required and was not provided")
+	}
+	// Could add URL parsing validation here too
+	// if _, err := url.ParseRequestURI(s.LookupURL); err != nil {
+	// 	return fmt.Errorf("invalid lookup_url: %v", err)
+	// }
+	if s.KeyParam == "" {
+		// This shouldn't happen if Provision sets a default,
+		// but good practice to validate critical params.
+		return fmt.Errorf("key_param is required (should have default)")
 	}
 	return nil
 }
 
-// Interface guards
+// Ensure the interface guard includes Validator
 var (
+	_ caddy.Provisioner           = (*ProxyQueryLookup)(nil) // Added Provisioner guard
+	_ caddy.Validator             = (*ProxyQueryLookup)(nil) // Added Validator guard
 	_ caddyhttp.MiddlewareHandler = (*ProxyQueryLookup)(nil)
 	_ caddyfile.Unmarshaler       = (*ProxyQueryLookup)(nil)
 )
