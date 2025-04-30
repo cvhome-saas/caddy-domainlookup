@@ -3,16 +3,13 @@ package proxyquerylookup
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"net/url"
-	"strconv"
-	"sync"
-	"time"
-
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"io/ioutil"
+	"net"
+	"net/http"
+	"net/url"
 )
 
 func init() {
@@ -21,10 +18,8 @@ func init() {
 
 // ProxyQueryLookup is a Caddy HTTP handler that appends a dynamic query parameter.
 type ProxyQueryLookup struct {
-	LookupURL string        `json:"lookup_url,omitempty"` // The URL to fetch the key
-	KeyParam  string        `json:"key_param,omitempty"`  // The key parameter to pass dynamically
-	CacheTTL  time.Duration `json:"cache_ttl,omitempty"`  // Cache expiration time in seconds
-	cache     sync.Map      // In-memory cache for key values
+	LookupURL string `json:"lookup_url,omitempty"` // The URL to fetch the key
+	KeyParam  string `json:"key_param,omitempty"`  // The key parameter to pass dynamically
 }
 
 // CaddyModule returns the Caddy module information.
@@ -43,27 +38,15 @@ func (s *ProxyQueryLookup) Provision(ctx caddy.Context) error {
 	if s.KeyParam == "" {
 		s.KeyParam = "key" // Default key parameter
 	}
-	if s.CacheTTL == 0 {
-		s.CacheTTL = 60 * time.Second // Default cache TTL
-	}
 	return nil
 }
 
 // ServeHTTP intercepts the request, fetches the key, and appends it as a query parameter.
 func (s *ProxyQueryLookup) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	// Extract the domain from the Host header
-	domain := r.Host
-	if domain == "" {
-		return caddyhttp.Error(http.StatusBadRequest, fmt.Errorf("missing Host header"))
-	}
-
-	// Check the cache for the key
-	if cached, ok := s.cache.Load(domain); ok {
-		if entry, valid := cached.(cacheEntry); valid && time.Since(entry.timestamp) < s.CacheTTL {
-			// Use cached value
-			s.appendQueryParam(r, entry.value)
-			return next.ServeHTTP(w, r)
-		}
+	domain, _, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		return caddyhttp.Error(http.StatusBadRequest, fmt.Errorf("invalid host: %v", err))
 	}
 
 	// Call the lookup endpoint to fetch the key
@@ -71,9 +54,6 @@ func (s *ProxyQueryLookup) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 	if err != nil {
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
-
-	// Cache the key
-	s.cache.Store(domain, cacheEntry{value: key, timestamp: time.Now()})
 
 	// Append the key as a query parameter
 	s.appendQueryParam(r, key)
@@ -138,26 +118,10 @@ func (s *ProxyQueryLookup) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if !d.Args(&s.KeyParam) {
 					return d.ArgErr()
 				}
-			case "cache_ttl":
-				var ttlStr string
-				if !d.Args(&ttlStr) {
-					return d.ArgErr()
-				}
-				ttl, err := strconv.Atoi(ttlStr)
-				if err != nil {
-					return fmt.Errorf("invalid cache_ttl value: %v", err)
-				}
-				s.CacheTTL = time.Duration(ttl) * time.Second
 			}
 		}
 	}
 	return nil
-}
-
-// cacheEntry represents a cached key value with a timestamp.
-type cacheEntry struct {
-	value     string
-	timestamp time.Time
 }
 
 // Interface guards

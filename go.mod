@@ -2,12 +2,7 @@ module github.com/cvhome-saas/caddy-proxyquerylookup
 
 go 1.22
 
-require (
-	github.com/caddyserver/caddy/v2 v2.7.6
-	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/rogpeppe/go-internal v1.9.0
-	go.uber.org/zap v1.25.0
-)
+require github.com/caddyserver/caddy/v2 v2.7.6
 
 require (
 	filippo.io/edwards25519 v1.0.0 // indirect
@@ -94,6 +89,7 @@ require (
 	go.step.sm/linkedca v0.20.1 // indirect
 	go.uber.org/mock v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/zap v1.25.0 // indirect
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/exp v0.0.0-20230310171629-522b1b587ee0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
