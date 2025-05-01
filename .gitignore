@@ -8,7 +8,7 @@
 /dataSources.local.xml
 /vcs.xml
 /modules.xml
-/caddy-proxyquerylookup.iml
+/caddy-domainlookup.iml
 /caddy
 ./.idea/*
 /.idea/workspace.xml

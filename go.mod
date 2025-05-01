@@ -1,4 +1,4 @@
-module github.com/cvhome-saas/caddy-proxyquerylookup
+module github.com/cvhome-saas/caddy-domainlookup
 
 go 1.22
 
