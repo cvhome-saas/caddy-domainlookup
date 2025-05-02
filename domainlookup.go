@@ -7,12 +7,14 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/patrickmn/go-cache"
 	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"net/url"
-	"os" // <-- Import the 'os' package
+	"os"
 	"strings"
+	"time"
 )
 
 func init() {
@@ -21,9 +23,11 @@ func init() {
 }
 
 type DomainLookup struct {
-	LookupURL string `json:"lookup_url,omitempty"`
+	LookupURL string        `json:"lookup_url,omitempty"`
+	CacheTTL  time.Duration `json:"cache_ttl,omitempty"`
 
 	logger *zap.Logger
+	cache  *cache.Cache
 }
 
 func (DomainLookup) CaddyModule() caddy.ModuleInfo {
@@ -34,11 +38,19 @@ func (DomainLookup) CaddyModule() caddy.ModuleInfo {
 }
 
 func (s *DomainLookup) Provision(ctx caddy.Context) error {
-	s.logger = ctx.Logger(s) // Get the logger from the context
+	s.logger = ctx.Logger(s)
+
+	// Set default CacheTTL to 10 minutes if not provided
+	if s.CacheTTL == 0 {
+		s.CacheTTL = 10 * time.Minute
+	}
+
+	// Initialize the cache with the specified TTL
+	s.cache = cache.New(s.CacheTTL, 2*s.CacheTTL)
 
 	s.logger.Info("DomainLookup provisioned",
-		// Note: This logs the URL *after* potential os.ExpandEnv in UnmarshalCaddyfile
 		zap.String("lookup_url", s.LookupURL),
+		zap.Duration("cache_ttl", s.CacheTTL),
 	)
 	return nil
 }
@@ -51,11 +63,11 @@ func (s *DomainLookup) Validate() error {
 }
 
 func (s *DomainLookup) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	domain := r.URL.Hostname() // Get hostname without port
+	domain := r.URL.Hostname()
 	if domain == "" {
 		domain = r.Host
 		if colonIndex := strings.Index(domain, ":"); colonIndex != -1 {
-			domain = domain[:colonIndex] // Strip port if present
+			domain = domain[:colonIndex]
 		}
 	}
 
@@ -64,7 +76,7 @@ func (s *DomainLookup) ServeHTTP(w http.ResponseWriter, r *http.Request, next ca
 	dataMap, err := s.fetchDataFromAPI(domain)
 	if err != nil {
 		s.logger.Error("failed to fetch data from API", zap.String("domain", domain), zap.Error(err))
-		return next.ServeHTTP(w, r) // Pass through on error
+		return next.ServeHTTP(w, r)
 	}
 
 	s.logger.Debug("Successfully fetched data from API", zap.String("domain", domain), zap.Any("data", dataMap))
@@ -75,11 +87,17 @@ func (s *DomainLookup) ServeHTTP(w http.ResponseWriter, r *http.Request, next ca
 }
 
 func (s *DomainLookup) fetchDataFromAPI(domain string) (map[string]string, error) {
-	// CRITICAL TODO: Replace http.Get with a configured http.Client with timeout!
+	// Check if the result is already cached
+	if cachedData, found := s.cache.Get(domain); found {
+		s.logger.Debug("Cache hit for domain", zap.String("domain", domain))
+		return cachedData.(map[string]string), nil
+	}
+
+	// Cache miss, proceed to fetch data from the API
 	lookupURLStr := fmt.Sprintf("%s?domain=%s", s.LookupURL, url.QueryEscape(domain))
 	s.logger.Debug("Calling lookup URL", zap.String("url", lookupURLStr))
 
-	resp, err := http.Get(lookupURLStr) // <-- Replace with http.Client!
+	resp, err := http.Get(lookupURLStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from %s: %w", lookupURLStr, err)
 	}
@@ -106,6 +124,10 @@ func (s *DomainLookup) fetchDataFromAPI(domain string) (map[string]string, error
 		return nil, fmt.Errorf("failed to parse response JSON from %s: %w", lookupURLStr, err)
 	}
 
+	// Store the result in the cache
+	s.cache.Set(domain, result, s.CacheTTL)
+	s.logger.Debug("Cache updated for domain", zap.String("domain", domain))
+
 	return result, nil
 }
 
@@ -126,33 +148,28 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	return &m, err
 }
 
-// UnmarshalCaddyfile sets up the module from Caddyfile tokens.
-// Syntax:
-//
-//	domainlookup {
-//	    lookup_url <url> | $ENV_VAR | ${ENV_VAR}
-//	}
-//
-// NOTE: This function now uses os.ExpandEnv. This means it expects
-// environment variables in the Caddyfile to use $VAR or ${VAR} syntax
-// if substitution is intended *at this stage*. Caddy's standard
-// {env.VAR} substitution happens *before* this function is called.
 func (s *DomainLookup) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() { // Process the line with the directive name
+	for d.Next() {
 		if d.NextArg() {
 			return d.ArgErr()
 		}
-		for d.NextBlock(0) { // Enter the block
+		for d.NextBlock(0) {
 			switch d.Val() {
 			case "lookup_url":
-				// --- Start Modification ---
 				var rawValue string
-				if !d.AllArgs(&rawValue) { // Read the raw argument(s)
+				if !d.AllArgs(&rawValue) {
 					return d.ArgErr()
 				}
-				// Expand environment variables using $VAR or ${VAR} syntax
 				s.LookupURL = os.ExpandEnv(rawValue)
-				// --- End Modification ---
+			case "cache_ttl":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				ttl, err := time.ParseDuration(d.Val())
+				if err != nil {
+					return d.Errf("invalid cache_ttl value: %v", err)
+				}
+				s.CacheTTL = ttl
 			default:
 				return d.Errf("unrecognized subdirective '%s'", d.Val())
 			}
