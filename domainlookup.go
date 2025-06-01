@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -154,17 +153,15 @@ func (s *DomainLookup) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			return d.ArgErr()
 		}
 		for d.NextBlock(0) {
-			switch d.Val() {
+			key := d.Val()
+			var value string
+			if !d.AllArgs(&value) {
+				return d.ArgErr()
+			}
+			switch key {
 			case "lookup_url":
-				var rawValue string
-				if !d.AllArgs(&rawValue) {
-					return d.ArgErr()
-				}
-				s.LookupURL = os.ExpandEnv(rawValue)
+				s.LookupURL = value
 			case "cache_ttl":
-				if !d.NextArg() {
-					return d.ArgErr()
-				}
 				ttl, err := time.ParseDuration(d.Val())
 				if err != nil {
 					return d.Errf("invalid cache_ttl value: %v", err)

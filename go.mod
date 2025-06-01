@@ -1,6 +1,8 @@
 module github.com/cvhome-saas/caddy-domainlookup
 
-go 1.22
+go 1.23.0
+
+toolchain go1.24.2
 
 require (
 	github.com/caddyserver/caddy/v2 v2.7.6
