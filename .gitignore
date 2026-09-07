@@ -13,3 +13,5 @@
 ./.idea/*
 /.idea/workspace.xml
 /.idea/*
+.claude/worktrees/
+.DS_Store
